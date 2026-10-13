@@ -1,0 +1,136 @@
+//
+// This file is to be applied to every subproject.
+//
+
+apply plugin: 'java'
+apply plugin: 'idea'
+apply from: rootProject.file('gradle/spotless.gradle')
+
+// group and version are set on all projects (including root) via the allprojects
+// block in the root build.gradle. Duplicating them here would drift during releases
+// (the release workflow only updates build.gradle).
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+}
+
+ext.getToolsJar = {
+    // Prefer a JDK 8 tools.jar, which contains com.sun.tools.attach, com.sun.source.*, and sun.jvmstat.*
+    try {
+        def jdk8 = javaToolchains.compilerFor { languageVersion.set(JavaLanguageVersion.of(8)) }.get()
+        def tj = jdk8.metadata.installationPath.file("lib/tools.jar")
+        return tj
+    } catch (Throwable ignore) {
+        // Fallback to empty file reference to avoid NPEs; callers should check existence
+        return file('non-existent-tools.jar')
+    }
+}
+
+ext.getJavac = { int version = 11 ->
+    return javaToolchains.compilerFor {
+        languageVersion.set(JavaLanguageVersion.of(version))
+    }.get().metadata.installationPath.file("bin/javac")
+}
+
+ext.getJavadoc = {
+    return javaToolchains.compilerFor {
+        languageVersion.set(JavaLanguageVersion.of(8))
+    }.get().metadata.installationPath.file("bin/javadoc")
+}
+
+ext.getGitCommit = {
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-parse', 'HEAD'
+            standardOutput = stdout
+            ignoreExitValue = true
+        }
+        def commit = stdout.toString().trim()
+        return commit ?: 'dev'
+    } catch (Exception e) {
+        return 'dev'
+    }
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+compileJava {
+    sourceCompatibility = 8
+    targetCompatibility = 8
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion.set(JavaLanguageVersion.of(11))
+    }
+}
+
+repositories {
+    mavenCentral()
+    // You may define additional repositories, or even remove "mavenCentral()".
+    // Read more about repositories here:
+    //   http://www.gradle.org/docs/current/userguide/dependency_management.html#sec:repositories
+}
+
+dependencies {
+    // Adding dependencies here will add the dependencies to each subproject.
+	testImplementation libs.junit.jupiter
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+String mavenArtifactId = name
+
+javadoc {
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
+    options.encoding("UTF-8")
+    executable = "${getJavadoc()}"
+    failOnError true
+    // Ensure Javadoc can resolve com.sun.* APIs (tools.jar on JDK8)
+    doFirst {
+        def toolsJar = getToolsJar()
+        try {
+            File tj = (toolsJar instanceof File) ? toolsJar : toolsJar?.asFile
+            if (tj != null && tj.exists()) {
+                classpath += files(tj)
+            }
+        } catch (Throwable ignore) {
+            // Ignore if toolchain lacks tools.jar (JDK9+); compile still uses modules
+        }
+    }
+}
+
+task sourcesJar(type: Jar, dependsOn: classes, description: 'Creates a jar from the source files.') {
+    archiveClassifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    archiveClassifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives jar
+    archives sourcesJar
+    archives javadocJar
+}
+
+task createFolders(description: 'Creates the source folders if they do not exist.') doLast {
+    sourceSets*.allSource*.srcDirs*.each { File srcDir ->
+        if (!srcDir.isDirectory()) {
+            println "Creating source folder: ${srcDir}"
+            srcDir.mkdirs()
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    // Always run tests, even when nothing changed.
+    dependsOn 'cleanTest'
+
+    // Show test results.
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}

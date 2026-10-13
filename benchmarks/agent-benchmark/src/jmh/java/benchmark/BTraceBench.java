@@ -1,0 +1,333 @@
+/*
+ * Copyright (c) 2008, 2024, Jaroslav Bachorik <j.bachorik@btrace.io>.
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package benchmark;
+
+import io.btrace.instr.MethodTracker;
+import java.io.IOException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
+import java.nio.file.FileVisitor;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+
+@State(Scope.Thread)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
+@Fork(1)
+@BenchmarkMode(Mode.AverageTime)
+public class BTraceBench {
+
+  private static class BTraceConfig {
+
+    private final String agentJar;
+    private final String scriptPath;
+    private final Path tmpRoot;
+
+    private static final FileVisitor<Path> DEL_TREE =
+        new FileVisitor<Path>() {
+          @Override
+          public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
+              throws IOException {
+            return FileVisitResult.CONTINUE;
+          }
+
+          @Override
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+              throws IOException {
+            Files.delete(file);
+            return FileVisitResult.CONTINUE;
+          }
+
+          @Override
+          public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+            return FileVisitResult.TERMINATE;
+          }
+
+          @Override
+          public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+            Files.delete(dir);
+            return FileVisitResult.CONTINUE;
+          }
+        };
+
+    public BTraceConfig(Path tmpRoot, String agentJar, String scriptPath) {
+      this.agentJar = agentJar;
+      this.scriptPath = scriptPath;
+      this.tmpRoot = tmpRoot;
+    }
+
+    public void cleanup() throws IOException {
+      Files.walkFileTree(tmpRoot, DEL_TREE);
+    }
+  }
+
+  long counter;
+  long sampleCounter;
+  long durCounter;
+
+  @Setup
+  public void setup() {
+    MethodTracker.registerCounter(1, 10);
+    MethodTracker.registerCounter(2, 50);
+    MethodTracker.registerCounter(3, 100);
+
+    Random r = new Random(System.currentTimeMillis());
+    sampleCounter = 0;
+    durCounter = 0;
+    counter = r.nextInt();
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethod() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodLevelNoMatch() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodSampled() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodPrintln1() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodPrintln1Sampled() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodPrintln2() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodPrintln3() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrumentedMethodPrintln24() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testMethod() {
+    counter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrDuration() {
+    durCounter++;
+  }
+
+  public boolean x = true;
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrDurationSampled() {
+    sampleCounter++;
+  }
+
+  @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  public void testInstrDurationSampledAdaptive() {
+    sampleCounter++;
+  }
+
+  //    @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Measurement(iterations = 5, time = 2000, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Benchmark
+  //    public void testSendCommand() {
+  //        br.send(new OkayCommand());
+  //    }
+  //
+  //    @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Measurement(iterations = 5, time = 2000, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Threads(2)
+  //    @Benchmark
+  //    public void testSendCommandMulti2() {
+  //        br.send(new OkayCommand());
+  //    }
+  //
+  //    @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Measurement(iterations = 5, time = 2000, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Threads(4)
+  //    @Benchmark
+  //    public void testSendCommandMulti4() {
+  //        br.send(new OkayCommand());
+  //    }
+  //
+  //    @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Measurement(iterations = 5, time = 2000, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Threads(8)
+  //    @Benchmark
+  //    public void testSendCommandMulti8() {
+  //        br.send(new OkayCommand());
+  //    }
+  //
+  //    @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Measurement(iterations = 5, time = 2000, timeUnit = TimeUnit.MILLISECONDS)
+  //    @Threads(16)
+  //    @Benchmark
+  //    public void testSendCommandMulti16() {
+  //        br.send(new OkayCommand());
+  //    }
+
+  long sampleHit10Checks = 0;
+  long sampleHit10Sampled = 0;
+
+  @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 20, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  @Threads(2)
+  public void testSampleHit10() {
+    sampleHit10Checks++;
+    if (MethodTracker.hit(1)) {
+      sampleHit10Sampled++;
+    }
+  }
+
+  @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 20, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  @Threads(2)
+  public void testSampleHit50() {
+    sampleHit10Checks++;
+    if (MethodTracker.hit(2)) {
+      sampleHit10Sampled++;
+    }
+  }
+
+  @Warmup(iterations = 5, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 20, time = 100, timeUnit = TimeUnit.MILLISECONDS)
+  @Benchmark
+  @Threads(2)
+  public void testSampleHit100() {
+    sampleHit10Checks++;
+    if (MethodTracker.hit(3)) {
+      sampleHit10Sampled++;
+    }
+  }
+
+  @org.openjdk.jmh.annotations.TearDown
+  public void teardown() {
+    if (sampleHit10Checks > 0) {
+      System.err.println("=== testSampleHit10");
+      System.err.println("#samples ~ " + sampleHit10Sampled);
+      if (sampleHit10Sampled > 0) {
+        System.err.println("#sampling rate ~ " + (sampleHit10Checks / sampleHit10Sampled));
+      }
+    }
+  }
+
+  public static void main(String[] args) throws Exception {
+    BTraceConfig bc = getConfig();
+    try {
+      Options opt =
+          new OptionsBuilder()
+              .addProfiler("stack")
+              //              .jvmArgsPrepend(
+              //                  "-javaagent:"
+              //                      + bc.agentJar
+              //                      + "=stdout=false,noServer=true,"
+              //                      + "script="
+              //                      + bc.scriptPath)
+              .include(".*" + BTraceBench.class.getSimpleName() + ".*test.*")
+              .build();
+
+      new Runner(opt).run();
+    } finally {
+      bc.cleanup();
+    }
+  }
+
+  private static BTraceConfig getConfig() throws IOException {
+    FileSystem fs = FileSystems.getDefault();
+
+    Path distLibs = null;
+    String basedir = System.getProperty("jmh.basedir");
+    String version = System.getProperty("project.version");
+    String scriptPath = System.getProperty("script.path");
+    Path root = null;
+    if (basedir == null) {
+      root = fs.getPath(".").toAbsolutePath();
+    } else {
+      root = Paths.get(basedir).getParent();
+    }
+    distLibs = root.resolve("btrace-dist/build/resources/main/" + version + "/libs");
+
+    Path agentPath = distLibs.resolve("btrace-agent.jar");
+    Path bootPath = distLibs.resolve("btrace-boot.jar");
+
+    Path tmpDir = Files.createTempDirectory("btrace-bench-");
+
+    Path targetPath =
+        Files.copy(
+            agentPath, tmpDir.resolve("btrace-agent.jar"), StandardCopyOption.REPLACE_EXISTING);
+    Files.copy(bootPath, tmpDir.resolve("btrace-boot.jar"), StandardCopyOption.REPLACE_EXISTING);
+
+    return new BTraceConfig(tmpDir, targetPath.toString(), scriptPath + "/TraceScript.btclass");
+  }
+}

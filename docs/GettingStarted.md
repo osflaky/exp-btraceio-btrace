@@ -1,0 +1,943 @@
+# BTrace Getting Started Guide
+
+## What is BTrace?
+
+BTrace is a safe, dynamic tracing tool for the Java platform. It allows you to dynamically instrument running Java applications without stopping them, recompiling code, or adding logging statements. BTrace works by injecting tracing code into the bytecode of target applications at runtime.
+
+**Use BTrace when you need to:**
+- Debug production issues without redeploying
+- Profile application performance in real-time
+- Track method calls, arguments, and return values
+- Monitor memory allocations and object creation
+- Investigate thread behavior and synchronization
+- Capture stack traces at specific points
+
+## Prerequisites
+
+- Java 8 or higher. BTrace 3.0 runs on Java 8–25+. Running BTrace against a JVM older than Java 17 is deprecated: it continues to work throughout 3.x but emits a deprecation warning. Support for Java < 17 will be removed in the next major release (4.0).
+- Basic knowledge of Java programming
+- Target Java application running with appropriate permissions
+
+## Installation
+
+### Download and Install
+
+1. **Download** the latest release from [GitHub releases](https://github.com/btraceio/btrace/releases/latest)
+
+2. **Extract** the distribution:
+   ```bash
+   # For .tar.gz
+   tar -xzf btrace-<version>.tar.gz
+
+   # For .zip
+   unzip btrace-<version>.zip
+   ```
+
+3. **Set environment variables** (optional but recommended):
+   ```bash
+   export BTRACE_HOME=/path/to/btrace
+   export PATH=$BTRACE_HOME/bin:$PATH
+   ```
+
+### Package Manager Installation
+
+**RPM-based systems (RedHat, CentOS, Fedora):**
+```bash
+sudo rpm -i btrace-<version>.rpm
+```
+
+**Debian-based systems (Ubuntu, Debian):**
+```bash
+sudo dpkg -i btrace-<version>.deb
+```
+
+### JBang Installation (Recommended for Quick Start)
+
+[JBang](https://www.jbang.dev/) makes it incredibly easy to use BTrace without manual installation. It automatically downloads and caches BTrace from Maven Central.
+
+**Install JBang** (one time):
+```bash
+# macOS / Linux
+curl -Ls https://sh.jbang.dev | bash -s - app setup
+
+# Windows (PowerShell)
+iex "& { $(iwr https://ps.jbang.dev) } app setup"
+
+# Or use package managers
+brew install jbangdev/tap/jbang    # macOS
+sdk install jbang                   # SDKMAN
+```
+
+**Use BTrace with JBang** (no separate BTrace installation needed):
+```bash
+# Attach to running application (replace <version> with desired version, e.g., 3.0.0)
+jbang io.btrace:btrace:<version> <PID> <script.java>
+
+# Add the BTrace JBang catalog (one time), then use the shorter alias
+jbang catalog add --name btraceio https://raw.githubusercontent.com/btraceio/jbang-catalog/main/jbang-catalog.json
+jbang btrace@btraceio <PID> <script.java>
+```
+
+**Extensions:** The published artifact bundles the default extensions, so a script that injects a
+service such as `MetricsService` or `PrinterService` works under jbang without a separate
+BTrace installation. A distribution install resolves extensions from `$BTRACE_HOME/extensions/`
+instead; those take precedence over the embedded copies when both are present.
+
+**Agent JAR:** The client automatically discovers the masked agent JAR (`btrace.jar`) on its classpath — no extraction step is needed. If you want to use the agent JAR directly (e.g., with `-javaagent`), find it in the Maven local repository (default `~/.m2`) after jbang downloads BTrace:
+```bash
+# The masked agent JAR is cached at:
+~/.m2/repository/io/btrace/btrace/<version>/btrace-<version>.jar
+
+# Use it directly with -javaagent:
+java -javaagent:~/.m2/repository/io/btrace/btrace/<version>/btrace-<version>.jar=script=MyTrace.class MyApp
+```
+
+**Benefits:**
+- No manual download or installation
+- Automatic version management via Maven coordinates
+- Works across all platforms (Windows, macOS, Linux)
+- Perfect for CI/CD pipelines and containers
+
+### Verify Installation
+
+```bash
+btrace -h
+# or with JBang
+jbang btrace@btraceio -h
+```
+
+You should see the BTrace help message with available options.
+
+## 2-Minute Oneliner Quick Start
+
+**New in BTrace:** DTrace-style oneliners let you debug without writing script files!
+
+### Quick Examples
+
+```bash
+# Find your Java application's PID
+jps
+
+# Trace method entry with arguments
+btrace -n 'TestApp::processData @entry { print method, args }' <PID>
+
+# Find slow methods (>50ms)
+btrace -n 'TestApp::* @return if duration>50ms { print method, duration }' <PID>
+
+# Count method invocations
+btrace -n 'TestApp::doWork @entry { count }' <PID>
+
+# Print stack traces
+btrace -n 'TestApp::processData @entry { stack(5) }' <PID>
+```
+
+**Oneliner Syntax:**
+```
+class-pattern::method-pattern @location [filter] { action }
+```
+
+- **Locations**: `@entry`, `@return`, `@error`
+- **Actions**: `print`, `count`, `time`, `stack`
+- **Filters**: `if duration>NUMBERms`, `if args[N]==VALUE`
+
+**For complete oneliner documentation**, see [Oneliner Guide](OnelinerGuide.md).
+
+**Want full BTrace power?** Continue to the full 5-minute quick start below.
+
+## 5-Minute Quick Start
+
+Let's trace a simple Java application to see BTrace in action with full Java scripts.
+
+### Step 1: Prepare a Test Application
+
+Create a simple Java program (`TestApp.java`):
+
+```java
+public class TestApp {
+    public static void main(String[] args) throws Exception {
+        System.out.println("TestApp started. Press Enter to begin...");
+        System.in.read();
+
+        while (true) {
+            doWork();
+            Thread.sleep(1000);
+        }
+    }
+
+    private static void doWork() {
+        String result = processData("example", 42);
+        System.out.println("Processed: " + result);
+    }
+
+    private static String processData(String name, int value) {
+        return name + "-" + value;
+    }
+}
+```
+
+Compile and run it:
+```bash
+javac TestApp.java
+java TestApp
+```
+
+### Step 2: Create Your First BTrace Script
+
+Create a BTrace script (`TraceMethods.java`) to trace method calls:
+
+```java
+import io.btrace.core.annotations.BTrace;
+import io.btrace.core.annotations.OnMethod;
+
+@BTrace
+public class TraceMethods {
+    @OnMethod(clazz = "TestApp", method = "processData")
+    public static void onProcessData(String name, int value) {
+        println("Called processData: name=" + name + ", value=" + str(value));
+    }
+}
+```
+
+> **Note:** `println` and `str` are part of BTrace's built-in flat DSL — they are auto-imported by
+> the compiler so you don't need any explicit import. See the
+> [Flat DSL lesson in the BTrace Tutorial](BTraceTutorial.md#lesson-7---flat-dsl) for all
+> available methods.
+
+### Step 3: Attach BTrace to the Running Application
+
+1. **Find the process ID** of your TestApp:
+   ```bash
+   jps
+   ```
+   Output will show something like:
+   ```
+   12345 TestApp
+   12346 Jps
+   ```
+
+2. **Attach BTrace**:
+   ```bash
+   btrace 12345 TraceMethods.java
+   ```
+
+3. **Press Enter** in the TestApp window to start processing
+
+4. **Observe the output** in the BTrace terminal:
+   ```
+   Called processData: name=example, value=42
+   Called processData: name=example, value=42
+   ...
+   ```
+
+5. **Detach BTrace**: Press `Ctrl+C` in the BTrace terminal and type `exit`
+
+Congratulations! You've successfully traced your first Java application with BTrace.
+
+## Quick Start: Histogram Metrics Extension
+
+Capture latency distributions and simple stats without external systems using the built-in histogram metrics extension (HdrHistogram-based).
+
+1. Ensure you built the distribution so extensions are available under `BTRACE_HOME/extensions/`.
+2. Create a probe that injects `MetricsService` (no special flags needed):
+
+```java
+import io.btrace.core.annotations.*;
+import io.btrace.metrics.MetricsService;
+import io.btrace.metrics.histogram.*;
+import io.btrace.metrics.stats.*;
+
+@BTrace
+public class LatencyProbe {
+   @Injected
+   private static MetricsService metrics;
+   private static HistogramMetric h;
+   private static StatsMetric s;
+
+   @OnMethod(clazz = "TestApp", method = "processData")
+   public static void onEntry() {
+      if (h == null) {
+         h = metrics.histogramMicros("testapp.process");
+         s = metrics.stats("testapp.process.stats");
+      }
+   }
+
+   @OnMethod(clazz = "TestApp", method = "processData", location = @Location(Kind.RETURN))
+   public static void onReturn(@Duration long durNs) {
+      long us = durNs / 1000;
+      h.record(us);
+      s.record(us);
+   }
+
+   @OnTimer(1000)
+   public static void report() {
+      HistogramSnapshot hs = h.snapshot();
+      StatsSnapshot ss = s.snapshot();
+      println("=== Metrics Report ===");
+      println("Count: " + ss.count());
+      println("Mean: " + ss.mean() + " μs");
+      println("Min: " + ss.min() + " μs");
+      println("Max: " + ss.max() + " μs");
+      println("P50: " + hs.p50() + " μs");
+      println("P95: " + hs.p95() + " μs");
+      println("P99: " + hs.p99() + " μs");
+      println("======================");
+   }
+}
+```
+
+3. Attach to your running app:
+```bash
+btrace <PID> LatencyProbe.java
+```
+
+See the full tutorial section: “Using the Histogram Metrics Extension (btrace-metrics)” in `docs/BTraceTutorial.md` for configuration and details.
+
+## Four Ways to Run BTrace
+
+BTrace offers multiple deployment modes to suit different use cases:
+
+### 1. JBang Mode (Easiest - Recommended)
+
+Use JBang to run BTrace without installation:
+
+```bash
+jbang io.btrace:btrace:<version> <PID> <script.java>
+
+# One-time catalog setup for the short alias
+jbang catalog add --name btraceio https://raw.githubusercontent.com/btraceio/jbang-catalog/main/jbang-catalog.json
+```
+
+**When to use:**
+- Quick start without installation
+- CI/CD pipelines
+- Trying BTrace for the first time
+- Containers and cloud environments
+
+**Examples:**
+```bash
+# Basic usage
+jbang btrace@btraceio 12345 MyTrace.java
+
+# With verbose output
+jbang btrace@btraceio -v 12345 MyTrace.java arg1 arg2
+```
+
+The masked agent JAR (`btrace.jar`) is discovered automatically from the client's classpath. After jbang downloads BTrace, the JAR is also available in the Maven local repository at `~/.m2/repository/io/btrace/btrace/<version>/btrace-<version>.jar` for direct `-javaagent` use.
+
+**Benefits:**
+- Zero installation required
+- Works everywhere (Windows, macOS, Linux, containers)
+- Automatic version management
+- Perfect for reproducible builds
+
+### 2. Attach Mode (Most Common)
+
+Attach to an already running Java process:
+
+```bash
+btrace [options] <PID> <script.java> [script-args]
+```
+
+**When to use:**
+- Debugging production issues
+- Ad-hoc performance analysis
+- You don't want to restart the application
+
+**Example:**
+```bash
+btrace -v 12345 MyTrace.java arg1 arg2
+```
+
+**Common options:**
+- `-v` - Verbose output
+- `-p <port>` - Specify port for communication
+- `-o <file>` - Redirect output to file
+
+Before attaching, inspect readiness without loading an agent or opening the BTrace command socket:
+
+```bash
+btrace doctor <pid>
+btrace doctor <pid> --json
+```
+
+Doctor reads target properties through the Attach API and then detaches. It reports the target
+JDK/vendor, Attach availability, an existing BTrace endpoint, and next-deployment remediation.
+Dynamic-agent loading permission is always reported as `not_tested`, because observing it would
+require the state-changing load that doctor deliberately avoids. Exit codes are stable: `0` ready,
+`2` preparation required, `3` inaccessible, and `4` unexpected failure or invalid invocation.
+
+### 3. Java Agent Mode (Pre-compiled Scripts)
+
+Start a Java application with BTrace agent and a pre-compiled script:
+
+```bash
+java -javaagent:btrace.jar=script=<script.class>,noServer=true[,arg1=value1]... YourApp
+```
+
+**When to use:**
+- Tracing from application startup
+- Capturing initialization issues
+- Controlled environments
+
+**Example:**
+```bash
+# First compile the script
+btracec MyTrace.java
+
+# Then run with agent
+java -javaagent:/path/to/btrace.jar=script=MyTrace.class,noServer=true MyApp
+```
+
+#### Startup modes and the 3.0 security boundary
+
+BTrace 3.0 distinguishes launch-time startup scripts from prepared mode:
+
+- **Startup-script mode** runs reviewed probes supplied at launch. Use `noServer=true` when no
+  later client connection is needed:
+
+  ```bash
+  java -javaagent:/path/to/btrace.jar=script=MyTrace.class,noServer=true MyApp
+  ```
+
+- **Prepared mode** is required to start an authenticated, loopback-only control endpoint for
+  later probe submission. Start the agent without a startup script and let the operating system
+  choose the port:
+
+  ```bash
+  java -javaagent:/path/to/btrace.jar=port=0 MyApp
+  ```
+
+  The agent binds a loopback address, generates an owner-protected token file, and publishes the
+  actual address, port, and token-file path through target JVM properties. A 3.0 client discovers
+  those values through the Attach API when you run `btrace <pid> ...`; the token itself is never a
+  process argument or system property. Generated token files are removed during orderly shutdown.
+
+  Use `authTokenFile=/owner/protected/path` to supply or create credentials at a controlled path,
+  and `bindAddress=127.0.0.1` or `bindAddress=::1` to select a loopback family. Non-loopback and
+  wildcard addresses fail startup. To keep a startup script and accept later authenticated
+  connections, set `noServer=false` explicitly.
+
+Prepared-mode authentication runs before V1 or V2 negotiation and before every operational
+command. Older clients cannot connect to a 3.0 prepared endpoint. Remote prepared-mode operation
+is not supported in 3.0.0; use startup-script mode with `noServer=true` or dynamic attach where the
+target JVM's policy permits it instead of exposing the command server remotely.
+
+#### Optional agent telemetry
+
+Agent telemetry is disabled by default. The agent creates no telemetry thread and performs no
+telemetry-related DNS or network operation unless the operator explicitly opts in:
+
+```bash
+java -javaagent:/path/to/btrace.jar=script=MyTrace.class,noServer=true,telemetry=true MyApp
+```
+
+The legacy target-JVM property `-Dbtrace.telemetry=true` is also recognized when the agent argument
+is absent. An explicit `telemetry=false` agent argument overrides that property.
+
+An opted-in startup attempts one `agent_start` event to
+`https://eu.posthog.com/capture/`. The event contains a fresh random event identifier plus
+`java_version`, `os_name`, `btrace_version`, and `agent_mode`; it contains no stable host identifier
+or application data. HTTP connect and read timeouts are one second each, and a daemon guard requests
+cancellation after two seconds. Telemetry failures are ignored and do not block agent startup.
+
+### 4. Launcher Mode (btracer)
+
+Use the `btracer` wrapper to compile and attach in one step:
+
+```bash
+btracer <script.class> <java-app-with-args>
+```
+
+**When to use:**
+- Local development and testing
+- Quick experiments
+- You have control over application launch
+
+**Example:**
+```bash
+# First compile the script
+btracec MyTrace.java
+
+# Launch app with trace
+btracer MyTrace.class java -cp myapp.jar com.example.Main
+```
+
+## Your First BTrace Scripts
+
+### Example 1: Trace Method Entry
+
+```java
+import io.btrace.core.annotations.*;
+
+@BTrace
+public class MethodEntry {
+    @OnMethod(clazz = "com.example.MyClass", method = "myMethod")
+    public static void onEntry() {
+        println("Method called!");
+    }
+}
+```
+
+### Example 2: Trace Method Arguments
+
+```java
+import io.btrace.core.annotations.*;
+
+@BTrace
+public class MethodArgs {
+    @OnMethod(clazz = "com.example.MyClass", method = "calculate")
+    public static void onCalculate(int x, int y) {
+        println("calculate called with: x=" + str(x) + ", y=" + str(y));
+    }
+}
+```
+
+### Example 3: Trace Method Return Value
+
+```java
+import io.btrace.core.annotations.*;
+
+@BTrace
+public class MethodReturn {
+    @OnMethod(clazz = "com.example.MyClass", method = "calculate", location = @Location(Kind.RETURN))
+    public static void onReturn(@Return int result) {
+        println("calculate returned: " + str(result));
+    }
+}
+```
+
+### Example 4: Measure Method Duration
+
+```java
+import io.btrace.core.annotations.*;
+
+@BTrace
+public class MethodDuration {
+    @OnMethod(clazz = "com.example.MyClass", method = "slowMethod")
+    public static void onEntry(@Duration long durationNanos) {
+        if (durationNanos > 0) {
+            println("slowMethod took: " + str(durationNanos / 1000000) + " ms");
+        }
+    }
+}
+```
+
+> **Tip:** `println`, `str`, and other common methods are part of BTrace's built-in flat DSL and are
+> auto-imported by the compiler — no explicit import needed. For advanced operations (reflection,
+> JMX counters, profiling), add `import static io.btrace.core.BTraceUtils.*;` explicitly.
+
+## Advanced: JFR Integration
+
+BTrace integrates with Java Flight Recorder (JFR) to create high-performance events with <1% overhead. JFR events are recorded natively by the JVM and can be analyzed with JDK Mission Control.
+
+**Requirements:** OpenJDK 8 (with backported JFR) or Java 11+ (not available in Java 9-10)
+
+### Example: Create JFR Event
+
+```java
+import io.btrace.core.annotations.*;
+import io.btrace.core.jfr.JfrEvent;
+import static io.btrace.core.BTraceUtils.*;
+
+@BTrace
+public class MyJfrTrace {
+    // Define JFR event factory
+    @Event(
+        name = "MethodCall",
+        label = "Method Call Event",
+        description = "Tracks method calls with duration",
+        category = {"myapp", "performance"},
+        fields = {
+            @Event.Field(type = Event.FieldType.STRING, name = "method"),
+            @Event.Field(type = Event.FieldType.LONG, name = "duration")
+        }
+    )
+    private static JfrEvent.Factory callEventFactory;
+
+    @TLS private static long startTime;
+
+    @OnMethod(clazz = "com.example.MyClass", method = "process")
+    public static void onEntry() {
+        startTime = timeNanos();
+    }
+
+    @OnMethod(clazz = "com.example.MyClass", method = "process",
+             location = @Location(Kind.RETURN))
+    public static void onReturn(@ProbeMethodName String method) {
+        // Create and commit JFR event
+        JfrEvent event = Jfr.prepareEvent(callEventFactory);
+        if (Jfr.shouldCommit(event)) {
+            Jfr.setEventField(event, "method", method);
+            Jfr.setEventField(event, "duration", timeNanos() - startTime);
+            Jfr.commit(event);
+        }
+    }
+}
+```
+
+### Viewing JFR Events
+
+After running the script, JFR events are recorded in the flight recorder:
+
+```bash
+# Run BTrace script
+btrace <PID> MyJfrTrace.java
+
+# Start flight recording (if not already running)
+jcmd <PID> JFR.start name=my-recording
+
+# Dump recording to file
+jcmd <PID> JFR.dump name=my-recording filename=recording.jfr
+
+# Analyze with Mission Control
+jmc recording.jfr
+```
+
+**Benefits over println:**
+- <1% overhead vs. 1-50% for println
+- Native JVM recording (no string formatting)
+- Can be analyzed offline
+- Timeline visualization in Mission Control
+
+For complete JFR documentation, see [BTrace Tutorial Lesson 5](BTraceTutorial.md) and [FAQ: JFR Integration](FAQ.md#jfr-integration).
+
+## BTrace in Containers and Kubernetes
+
+BTrace works in containerized environments with some considerations.
+
+### Docker Containers
+
+**Attach to running container:**
+```bash
+# Find container ID/name
+docker ps
+
+# Execute BTrace in container
+docker exec -it <container-id> btrace <PID> script.java
+```
+
+**Prerequisites:**
+- JDK (not JRE) must be installed in container
+- BTrace must be available in container or mounted
+- Same user permissions as target JVM
+
+**Example Dockerfile with official BTrace images:**
+```dockerfile
+# Option 1: Copy BTrace into your application image (recommended)
+FROM btrace/btrace:latest AS btrace
+FROM bellsoft/liberica-openjdk-debian:11-cds
+
+COPY --from=btrace /opt/btrace /opt/btrace
+ENV BTRACE_HOME=/opt/btrace
+ENV PATH=$PATH:$BTRACE_HOME/bin
+
+# Your application...
+COPY target/myapp.jar /app/
+ENTRYPOINT ["java", "-jar", "/app/myapp.jar"]
+```
+
+**Alternative: Manual installation (if not using official images):**
+```dockerfile
+FROM bellsoft/liberica-openjdk-debian:11-cds
+RUN curl -L https://github.com/btraceio/btrace/releases/download/v3.0.0/btrace-3.0.0.tar.gz \
+    | tar -xz -C /opt/
+ENV BTRACE_HOME=/opt/btrace-3.0.0
+ENV PATH=$PATH:$BTRACE_HOME/bin
+```
+
+See [docker/README.md](../docker/README.md) for more Docker usage patterns.
+
+### Kubernetes Pods
+
+**Attach to pod:**
+```bash
+# Find pod and process ID
+kubectl get pods
+kubectl exec <pod-name> -- jps
+
+# Run BTrace
+kubectl exec -it <pod-name> -- btrace <PID> script.java
+```
+
+**Copy script to pod first (if needed):**
+```bash
+kubectl cp MyTrace.java <pod-name>:/tmp/
+kubectl exec -it <pod-name> -- btrace <PID> /tmp/MyTrace.java
+```
+
+**Trace multiple pods:**
+```bash
+# Get all pods for a deployment
+PODS=$(kubectl get pods -l app=myapp -o jsonpath='{.items[*].metadata.name}')
+
+# Attach to each pod
+for POD in $PODS; do
+  echo "Tracing $POD..."
+  kubectl exec $POD -- btrace 1 script.java &
+done
+```
+
+### Sidecar Pattern
+
+Add BTrace as a sidecar container for persistent availability:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  template:
+    spec:
+      shareProcessNamespace: true  # Important: enables cross-container process visibility
+      containers:
+      - name: app
+        image: myapp:latest
+
+      - name: btrace
+        image: btrace/btrace:latest-alpine  # Official BTrace Alpine image
+        command: ["/bin/sh", "-c", "while true; do sleep 30; done"]
+        volumeMounts:
+        - name: btrace-scripts
+          mountPath: /scripts
+      volumes:
+      - name: btrace-scripts
+        configMap:
+          name: btrace-scripts
+```
+
+**Note:** Requires `shareProcessNamespace: true` to allow sidecar to see app container processes.
+
+**Using the sidecar:**
+```bash
+# Execute BTrace from sidecar
+kubectl exec <pod-name> -c btrace -- btrace $(pgrep -f myapp) /scripts/trace.btrace
+
+# View output
+kubectl logs <pod-name> -c btrace
+```
+
+### Common Issues in K8s
+
+1. **PID Discovery**: Use `jps` or `ps aux` to find Java process ID
+2. **Port Conflicts**: BTrace uses port 2020 by default; use `-p` flag if needed
+3. **Security Policies**: Pod Security Policies may block ptrace; adjust as needed
+4. **Resource Limits**: BTrace overhead may trigger CPU/memory limits
+
+For comprehensive troubleshooting, see [Troubleshooting: Kubernetes](Troubleshooting.md#kubernetes-and-cloud-deployments).
+
+## Fat Agent JAR (Single-JAR Deployment)
+
+For environments where managing multiple JARs is impractical (Spark executors, Hadoop nodes, minimal containers), BTrace provides a **fat agent JAR** with embedded extensions.
+
+### Why Fat Agent?
+
+Standard BTrace deployment requires multiple files:
+- `btrace.jar` (or legacy `btrace-agent.jar` + `btrace-boot.jar`)
+- Extension JARs in `$BTRACE_HOME/extensions/`
+
+The fat agent bundles everything into a single JAR that works without `$BTRACE_HOME`.
+
+### Building the Fat Agent
+
+```bash
+# Build with all available extensions
+./gradlew :btrace-dist:fatAgentJar
+
+# Build with specific extensions only
+./gradlew :btrace-dist:fatAgentJar -PembedExtensions=btrace-metrics,btrace-statsd
+
+# Output location
+ls btrace-dist/build/fat-agent/btrace-agent-fat.jar
+```
+
+### Using the Fat Agent
+
+```bash
+# Start application with fat agent
+java -javaagent:/path/to/btrace-agent-fat.jar MyApp
+
+# With agent options
+java -javaagent:/path/to/btrace-agent-fat.jar=debug=true,port=2021 MyApp
+
+# Verify embedded extensions loaded (look for "Extension system initialized with N")
+java -javaagent:/path/to/btrace-agent-fat.jar=debug=true MyApp 2>&1 | grep "Extension"
+```
+
+### Spark Example
+
+```bash
+# Copy fat agent to cluster-accessible location
+hdfs dfs -put btrace-agent-fat.jar /btrace/
+
+# Submit with agent
+spark-submit \
+  --conf spark.driver.extraJavaOptions="-javaagent:btrace-agent-fat.jar" \
+  --conf spark.executor.extraJavaOptions="-javaagent:btrace-agent-fat.jar" \
+  --files btrace-agent-fat.jar \
+  myapp.jar
+```
+
+### Kubernetes Example
+
+```dockerfile
+# Minimal container with fat agent only
+FROM openjdk:17-slim
+
+# Copy only the fat agent (no BTRACE_HOME needed)
+COPY btrace-agent-fat.jar /opt/btrace/
+
+# Your application
+COPY myapp.jar /app/
+ENTRYPOINT ["java", "-javaagent:/opt/btrace/btrace-agent-fat.jar", "-jar", "/app/myapp.jar"]
+```
+
+### Custom Fat Agent Builds
+
+For custom extension combinations, use the Gradle plugin:
+
+Built-in extensions are supplied as packages in the BTrace distribution's `extensions/` directory.
+Use `file(...)` for those packages or `project(...)` for an in-tree/custom extension. The
+`maven(...)` source is only for separately published third-party extensions.
+
+```groovy
+plugins {
+    id 'io.btrace.fat-agent'
+}
+
+btraceFatAgent {
+    baseName = 'my-btrace-agent'
+
+    embedExtensions {
+        // BTrace-built extension packages from the distribution's extensions/ directory
+        file('/path/to/btrace-metrics-3.0.0-extension.zip')
+        file('/path/to/btrace-statsd-3.0.0-extension.zip')
+
+        // Custom/local extension package
+        file('libs/my-custom-extension.zip')
+    }
+}
+```
+
+#### Writing Extensions That Integrate With App Types (@ExternalType)
+
+When your extension needs to interact with application-specific classes (Spark events, Hadoop objects, etc.), use `@ExternalType` to generate lazy reflective dispatchers at build time:
+
+```java
+// src/main/java/org/example/ext/api/JobEvent.java
+@ExternalType("org.apache.spark.scheduler.SparkListenerJobStart")
+public interface JobEvent {
+    int jobId();
+    long time();
+}
+```
+
+The plugin auto-registers the annotation processor, which generates `JobEvent$Ext` with cached, lazy-resolving static methods. See the normative [Extension Development Guide](BTraceExtensionDevelopmentGuide.md#app-type-adapters-with-externaltype) for the exact supported boundary and required error policy.
+
+#### Zero-Config Probe Auto-Selection
+
+Extensions embedded in a fat agent can automatically activate the right bundled probes by implementing `ExtensionConfigurator`. The agent calls the configurator at startup to detect the environment (driver vs executor, namenode vs datanode, etc.) and enables the matching probes — no `probes=` argument needed. See [Extension Development Guide — Bundled Probes](BTraceExtensionDevelopmentGuide.md#bundled-probes-and-zero-config-auto-selection).
+
+### Maven builds
+
+The unpublished Maven fat-agent module was removed for 3.0.0 because its pre-3.0 artifact contract
+cannot safely load published 3.0 extensions. Use the
+[`io.btrace.fat-agent` Gradle plugin](../btrace-gradle-plugin/README.md), or deploy the standard
+`io.btrace:btrace` artifact without embedded extensions.
+
+## Common Pitfalls and Solutions
+
+### 1. Permission Denied / Attachment Fails
+
+**Problem:** `Unable to attach to target VM`
+
+**Solutions:**
+- Ensure BTrace and target app run as the same user
+- **JDK 20 and older**: Check if target JVM has `-XX:+DisableAttachMechanism` (remove it)
+- **JDK 21+**: Add `-XX:+EnableDynamicAgentLoading` to target JVM to suppress warnings and ensure compatibility
+- Verify JDK (not JRE) is installed
+
+**Note**: Starting with JDK 21, dynamic agent loading triggers warnings. In a future JDK release, it will be disabled by default, requiring `-XX:+EnableDynamicAgentLoading` to use BTrace's attach mode. See [Troubleshooting: JVM Attachment Issues](Troubleshooting.md#jvm-attachment-issues) for details.
+
+### 2. Script Verification Errors
+
+**Problem:** `BTrace script verification failed`
+
+**Common causes:**
+- Using forbidden operations (creating new threads, I/O operations)
+- Calling non-BTrace methods
+- Using synchronization primitives
+
+**Solution:** Use only BTrace-safe operations from `BTraceUtils` class.
+
+### 3. No Output from Script
+
+**Problem:** Script attaches but produces no output
+
+**Checklist:**
+- Verify class and method names are correct (case-sensitive)
+- Check if the method is actually being called in the target app
+- Use regular expressions carefully: `/com\\.example\\..*/` not `/com.example.*/`
+- Ensure `println()` is imported from `BTraceUtils`
+
+### 4. Script Not Finding Classes
+
+**Problem:** Script doesn't match any classes
+
+**Solutions:**
+- Use fully qualified class names: `"com.example.MyClass"` not `"MyClass"`
+- For inner classes use `$`: `"com.example.Outer$Inner"`
+- Test with wildcards: `"/com\\.example\\..*/"`
+
+### 5. Performance Impact
+
+**Problem:** BTrace slows down the application
+
+**Solutions:**
+- Use sampling: `@Sampled` annotation
+- Add level filtering: `@Level` annotation
+- Limit scope: trace specific methods, not all methods
+- Avoid tracing high-frequency methods
+
+### 6. Unicode or Special Characters in Output
+
+**Problem:** Garbled output with special characters
+
+**Solution:** Set encoding:
+```bash
+btrace -Dfile.encoding=UTF-8 <PID> script.java
+```
+
+## Next Steps
+
+Now that you have BTrace running, explore these resources:
+
+1. **[BTrace Tutorial](BTraceTutorial.md)** - Progressive lessons covering all features
+2. **[Quick Reference](QuickReference.md)** - Annotation and API cheat sheet
+3. **[Sample Scripts](../btrace-dist/src/main/resources/samples/)** - 50+ real-world examples
+4. **[Troubleshooting Guide](Troubleshooting.md)** - Solutions to common problems
+5. **[BTrace Wiki](https://github.com/btraceio/btrace/wiki/Home)** - Comprehensive user guide
+
+## Tips for Success
+
+- **Start simple**: Begin with basic method tracing before complex instrumentation
+- **Test locally**: Verify scripts on test applications before production use
+- **Use samples**: Browse the 50+ sample scripts for patterns
+- **Monitor overhead**: Always measure BTrace's performance impact
+- **Keep scripts focused**: One script per specific issue
+- **Version control**: Save useful scripts for reuse
+
+## See Also
+
+- **[Documentation Hub](README.md)** - Complete documentation map and learning paths
+- **[Quick Reference](QuickReference.md)** - Annotation and API cheat sheet
+- **[BTrace Tutorial](BTraceTutorial.md)** - Progressive lessons covering all features
+- **[Troubleshooting Guide](Troubleshooting.md)** - Solutions to common problems
+- **[FAQ](FAQ.md)** - Common questions and best practices
+
+## Getting Help
+
+- **Slack**: [btrace.slack.com](http://btrace.slack.com/)
+- **Gitter**: [gitter.im/btraceio/btrace](https://gitter.im/btraceio/btrace)
+- **GitHub Issues**: [github.com/btraceio/btrace/issues](https://github.com/btraceio/btrace/issues)
+- **Wiki**: [github.com/btraceio/btrace/wiki](https://github.com/btraceio/btrace/wiki/Home)

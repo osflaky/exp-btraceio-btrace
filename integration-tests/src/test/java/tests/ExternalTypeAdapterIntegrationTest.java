@@ -1,0 +1,145 @@
+/*
+ * Copyright (c) 2008, 2024, Jaroslav Bachorik <j.bachorik@btrace.io>.
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package tests;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import tests.harness.Completion;
+
+/**
+ * End-to-end integration test for the @ExternalType annotation processor.
+ *
+ * <p>Verifies that: 1. btracec accepts a probe that uses a service backed by @ExternalType adapters
+ * 2. The agent loads the extension without errors 3. The generated ExternalDataType$Ext adapter
+ * resolves resources.ExternalData at runtime via the target application's classloader (TCCL) and
+ * successfully dispatches both a virtual instance call (value()) and a static call (tag())
+ */
+public class ExternalTypeAdapterIntegrationTest extends RuntimeTest {
+
+  @BeforeAll
+  public static void setup() throws Exception {
+    classSetup();
+  }
+
+  @BeforeEach
+  @Override
+  public void reset() {
+    super.reset();
+    try (ServerSocket ss = new ServerSocket(0)) {
+      btracePort = ss.getLocalPort();
+    } catch (IOException e) {
+      throw new RuntimeException("Failed to find a free port", e);
+    }
+  }
+
+  @Test
+  public void testExternalTypeAdapterTagAndValue() throws Exception {
+    configureExternalTypeExtension();
+    testDynamic(
+        "resources.Main",
+        "btrace/ExternalTypeAdapterTest.java",
+        Completion.untilContains(
+            "tag=ext-data-ok",
+            "value=42",
+            "child=ext-child-chain-ok",
+            "accepted-child=ext-child-chain-ok",
+            "overloads=ext-overload-text-ok,ext-overload-child-ext-child-chain-ok",
+            "phase5=ext-field-43,ext-child-chain-ok,44,45,ext-child-chain-ok,ext-child-chain-ok"),
+        new ResultValidator() {
+          @Override
+          public void validate(String stdout, String stderr, int retcode, String jfrFile) {
+            assertFalse(
+                stdout.contains("FAILED"), "Probe should not have failed. stderr: " + stderr);
+            assertTrue(
+                stdout.contains("tag=ext-data-ok"),
+                "@ExternalType static dispatch failed. stdout: " + stdout);
+            assertTrue(
+                stdout.contains("value=42"),
+                "@ExternalType virtual dispatch failed. stdout: " + stdout);
+            assertTrue(
+                stdout.contains("child=ext-child-chain-ok"),
+                "@ExternalType target-type chain failed. stdout: " + stdout);
+            assertTrue(
+                stdout.contains("accepted-child=ext-child-chain-ok"),
+                "@ExternalType target-type parameter dispatch failed. stdout: " + stdout);
+            assertTrue(
+                stdout.contains(
+                    "overloads=ext-overload-text-ok,ext-overload-child-ext-child-chain-ok"),
+                "@ExternalType overload dispatch failed. stdout: " + stdout);
+            assertTrue(
+                stdout.contains(
+                    "phase5=ext-field-43,ext-child-chain-ok,44,45,ext-child-chain-ok,ext-child-chain-ok"),
+                "@ExternalType field, construction, or type narrowing failed. stdout: " + stdout);
+          }
+        });
+  }
+
+  @Test
+  public void testExternalTypeAdapterExplicitLoader() throws Exception {
+    configureExternalTypeExtension();
+    testDynamic(
+        "resources.Main",
+        "btrace/ExternalTypeAdapterExplicitTest.java",
+        Completion.untilContains("explicit-tag=ext-data-explicit-ok"),
+        new ResultValidator() {
+          @Override
+          public void validate(String stdout, String stderr, int retcode, String jfrFile) {
+            assertFalse(
+                stdout.contains("FAILED"), "Probe should not have failed. stderr: " + stderr);
+            assertTrue(
+                stdout.contains("explicit-tag=ext-data-explicit-ok"),
+                "@ExternalType explicit static dispatch changed TCCL or selected the wrong loader. stdout: "
+                    + stdout);
+          }
+        });
+  }
+
+  private void configureExternalTypeExtension() {
+    Path integrationBuild =
+        Paths.get(System.getProperty("project.dir"), "build").toAbsolutePath().normalize();
+    Path stagedClientLibs =
+        Paths.get(System.getProperty("btrace.externalType.client.libs"))
+            .toAbsolutePath()
+            .normalize();
+    Path stagedExtensions =
+        Paths.get(System.getProperty("btrace.externalType.extensions"))
+            .toAbsolutePath()
+            .normalize();
+    assertTrue(
+        stagedClientLibs.startsWith(integrationBuild), "staged client libs must be isolated");
+    assertTrue(stagedExtensions.startsWith(integrationBuild), "staged extensions must be isolated");
+    assertTrue(Files.isRegularFile(stagedClientLibs.resolve("btrace.jar")));
+    assertTrue(Files.isDirectory(stagedExtensions.resolve("btrace-ext-test")));
+    Path releaseExtensions =
+        Paths.get(System.getProperty("btrace.libs")).getParent().resolve("extensions");
+    assertFalse(
+        Files.exists(releaseExtensions.resolve("btrace-ext-test")),
+        "test extension must not be staged in the release distribution");
+    targetExtensionPath = stagedExtensions.toString();
+    clientBtraceLibs = stagedClientLibs.toString();
+    attachDelayMs = 500;
+  }
+}

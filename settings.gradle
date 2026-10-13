@@ -1,0 +1,110 @@
+// Use the in-repo Gradle plugin for extension authorship without needing a remote repository
+pluginManagement {
+    includeBuild('btrace-gradle-plugin')
+}
+
+rootProject.name = 'btrace-ng'
+
+// Find the directories containing a "build.gradle" file in the root directory
+// of the project. That is, every directory containing a "build.gradle" will
+// be automatically the subproject of this project.
+def subDirs = rootDir.listFiles(new FileFilter() {
+    boolean accept(File file) {
+        if (!file.isDirectory()) {
+            return false
+        }
+        if (file.name == 'buildSrc') {
+            return false
+        }
+        return new File(file, 'build.gradle').isFile()
+    }
+})
+
+subDirs.each { File dir ->
+    if (dir.name == 'btrace-gradle-plugin') {
+        // This module is consumed as an included build via pluginManagement
+        // to provide the Gradle plugin. Do not include it as a subproject.
+        return
+    }
+    // Skip legacy, removed modules
+    if (dir.name in ['btrace-services', 'btrace-services-api', 'btrace-statsd']) {
+        return
+    }
+    if (dir.name.startsWith("btrace-")) {
+        include dir.name
+    }
+}
+
+include "integration-tests"
+include "benchmarks:agent-benchmark"
+include "benchmarks:runtime-benchmarks"
+
+// Explicitly include nested extension modules
+include 'btrace-extensions:btrace-metrics'
+include 'btrace-extensions:btrace-utils'
+include 'btrace-extensions:btrace-statsd'
+include 'btrace-extensions:examples:btrace-spark'
+include 'btrace-extensions:examples:btrace-hadoop'
+include 'btrace-extensions:btrace-ext-test'
+include 'btrace-extensions:btrace-llm-trace'
+include 'btrace-extensions:btrace-rag-quality'
+include 'btrace-extensions:btrace-contracts'
+include 'btrace-extensions:btrace-gpu-bridge'
+
+dependencyResolutionManagement {
+    versionCatalogs {
+        libs {
+            // Families...
+            version('asm', '9.10.1')
+            version('jmh', '1.37')
+            version('jmhGradlePlugin', '0.7.3')
+            version('slf4j', '2.0.19')
+            version('junit', '6.1.3')
+            version('testcontainers', '2.0.5')
+
+            // *** Gradle plugins ***
+            plugin ('spotless', 'com.diffplug.spotless').version('8.10.2')
+            plugin ('versioning', 'net.nemerosa.versioning').version('4.0.1')
+            plugin ('ospackage', 'com.netflix.nebula.ospackage').version('12.3.0')
+            plugin ('publish', 'io.github.gradle-nexus.publish-plugin').version('2.0.0')
+            plugin ('shadow', 'com.gradleup.shadow').version('9.6.1')
+            plugin ('sdkman-vendors', 'io.sdkman.vendors').version('3.0.0')
+            plugin ('foojay-resolver', 'org.gradle.toolchains.foojay-resolver-convention').version('1.0.0')
+
+            plugin ('jmh', 'me.champeau.jmh').versionRef('jmhGradlePlugin')
+
+            // *** Libraries ***
+
+            // https://mvnrepository.com/artifact/com.google.auto.service
+            library ('autoService', 'com.google.auto.service', 'auto-service').version('1.1.1')
+            // https://mvnrepository.com/artifact/org.jctools
+            library ('jctools', 'org.jctools', 'jctools-core').version('4.0.7')
+
+
+            // https://mvnrepository.com/artifact/org.slf4j
+            library ('slf4j',  'org.slf4j', 'slf4j-api').versionRef('slf4j')
+            library ('slf4j-simple',  'org.slf4j', 'slf4j-simple').versionRef('slf4j')
+
+            // https://mvnrepository.com/artifact/org.ow2.asm
+            library ('asm',  'org.ow2.asm', 'asm').versionRef('asm')
+            library ('asm-tree',  'org.ow2.asm', 'asm-tree').versionRef('asm')
+            library ('asm-util',  'org.ow2.asm', 'asm-util').versionRef('asm')
+
+            // https://mvnrepository.com/artifact/org.openjdk.jmh
+            library ('jmh', 'org.openjdk.jmh', 'jmh-core').versionRef('jmh')
+            library ('jmh-annprocess', 'org.openjdk.jmh', 'jmh-generator-annprocess').versionRef('jmh')
+
+            // https://mvnrepository.com/artifact/org.junit.jupiter
+            library ('junit', 'org.junit', 'junit-bom').versionRef('junit')
+            library ('junit-jupiter', 'org.junit.jupiter', 'junit-jupiter').versionRef('junit')
+            library ('testcontainers', 'org.testcontainers', 'testcontainers').versionRef('testcontainers')
+            library ('testcontainers-junit-jupiter', 'org.testcontainers', 'junit-jupiter').versionRef('testcontainers')
+
+            // https://mvnrepository.com/artifact/org.hdrhistogram/HdrHistogram
+            library ('hdrhistogram', 'org.hdrhistogram', 'HdrHistogram').version('2.2.2')
+
+            // https://mvnrepository.com/artifact/com.clearspring.analytics/stream
+            library ('stream-lib', 'com.clearspring.analytics', 'stream').version('2.9.8')
+        }
+    }
+}

@@ -1,0 +1,40 @@
+LCONST_0
+LSTORE 4
+LCONST_0
+LSTORE 6
+INVOKESTATIC java/lang/System.nanoTime ()J
+LSTORE 6
+LSTORE 8
+ASTORE 10
+ASTORE 11
+ALOAD 11
+ALOAD 10
+LLOAD 8
+INVOKESTATIC java/lang/System.nanoTime ()J
+LLOAD 6
+LSUB
+LSTORE 4
+L1
+FRAME FULL [resources/OnMethodTest java/lang/String J J J J java/lang/String resources/OnMethodTest] [J]
+INVOKESTATIC io/btrace/runtime/LinkingFlag.get ()I
+IFNE L2
+DUP2
+LSTORE 12
+LLOAD 12
+LLOAD 4
+ALOAD 10
+LLOAD 8
+INVOKEDYNAMIC $btrace$io$btrace$runtime$auxiliary$MethodCallDuration$args(JJLjava/lang/String;J)V [
+// handle kind 0x6 : INVOKESTATIC
+io/btrace/runtime/IndyDispatcher.bootstrap(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;)Ljava/lang/invoke/CallSite;
+// arguments:
+"io/btrace/runtime/auxiliary/MethodCallDuration"
+]
+L2
+FRAME SAME1 J
+L3
+LOCALVARIABLE this Lresources/OnMethodTest; L0 L3 0
+LOCALVARIABLE a Ljava/lang/String; L0 L3 1
+LOCALVARIABLE b J L0 L3 2
+MAXSTACK = 9
+MAXLOCALS = 14

@@ -1,0 +1,56 @@
+*.class
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.war
+*.ear
+
+# Un-ignore specific files
+!btrace-agent/src/test/resources/packed/test-pack.jar
+
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+hs_err_pid*
+
+build
+dist
+make/netbeans/nbproject/private
+TEST-*
+!btrace-agent/src/test/resources/packed/test-pack.jar
+make/junit*
+make/private.properties
+btrace-benchmark/target
+btrace-benchmark/build
+benchmark/*.iml
+junit*
+# ... but the JUnit platform config is source, not build output
+!**/junit-platform.properties
+/btrace-statsd/target/
+*.iml
+.gradle
+.gradle-user
+.idea
+!/lib/btrace-asm-*.jar
+!/lib/btrace-jctools-core-*.jar
+!/lib/btrace-hppcrt-*.jar
+!/test-lib/*.jar
+CHANGELOG.md
+gradle.properties
+/.nb-gradle/
+/.nb-gradle-properties
+.github_changelog_generator
+**/out/*
+gradle-wrapper.properties
+
+/.java.versions
+compile.log
+.worktrees/
+
+# OS / editor / tool noise
+.DS_Store
+.cachebro/
+gradle/gradle-daemon-jvm.properties
+# JVM thread-dump artifacts from stalled integration tests
+javacore.*.txt
