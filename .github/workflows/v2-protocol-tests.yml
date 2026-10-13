@@ -1,0 +1,131 @@
+# Workflow for testing BTrace Binary Protocol v2
+# This workflow runs comprehensive tests for the v2 protocol implementation
+# including unit tests, JMH benchmarks, and protocol negotiation tests
+
+name: V2 Protocol Tests
+
+on:
+  # Run on PRs when labeled with 'test:v2-protocol'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  unit-tests:
+    name: V2 Protocol Unit Tests [${{ matrix.expander_leg }}]
+    runs-on: ${{ matrix.runner }}
+    # Only run if triggered by schedule, manual dispatch, or PR with 'test:v2-protocol' label
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test:v2-protocol'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: macos-latest
+          java: 21
+          arch: arm64
+          runner: macos-latest
+          expander_leg: macos-latest-21-arm64
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7
+
+    - name: Cache Java binaries
+      id: cache-java
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6
+      with:
+        path: ${{ runner.tool_cache }}/Java_*
+        key: java-${{ runner.os }}-${{ runner.arch }}-temurin-21
+
+      # The build configures JDK 8 (javadoc/agent toolchains, resolved at configuration
+      # time) and compiles with a JDK 11 toolchain. windows-latest ships both preinstalled,
+      # windows-11-arm ships neither, and no Temurin JDK 8/11 exists for Windows aarch64,
+      # so install the x64 builds there (they run under Windows 11 x64 emulation) and hand
+      # them to Gradle via org.gradle.java.installations.paths below. The macOS runners
+      # (macos-15-intel and macos-latest) do not provide a JDK 8 that Gradle can detect
+      # either, and Temurin 8 has no macOS aarch64 build, so install the x64 builds there
+      # too (native on Intel, Rosetta 2 on Apple silicon).
+    - name: Install JDK 8 toolchain (Windows arm64, macOS)
+      id: jdk8
+      if: runner.os == 'macOS' || (runner.os == 'Windows' && runner.arch == 
+        'ARM64')
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6   # v6
+      with:
+        java-version: 8
+        distribution: temurin
+        architecture: x64
+
+    - name: Install JDK 11 toolchain (Windows arm64, macOS)
+      id: jdk11
+      if: runner.os == 'macOS' || (runner.os == 'Windows' && runner.arch == 
+        'ARM64')
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6   # v6
+      with:
+        java-version: 11
+        distribution: temurin
+        architecture: x64
+
+      # The JDK under test (matrix.java) is installed with setup-java, which works on
+      # every runner OS, unlike apt-get/sudo/SDKMAN that exist only on Linux. Gradle
+      # finds it via org.gradle.java.installations.paths and selects it through the
+      # testJavaVersion toolchain property (see btrace-core/build.gradle).
+    - name: Install JDK ${{ matrix.java }} under test
+      id: test-jdk
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6   # v6
+      with:
+        java-version: ${{ matrix.java }}
+        distribution: temurin
+
+      # Gradle 9.x requires JVM 17+ to run the build itself. This JDK only hosts
+      # the Gradle daemon. Set up last so JAVA_HOME points at it.
+    - name: Set up JDK 21 (Gradle runner)
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6   # v6
+      with:
+        java-version: 21
+        distribution: temurin
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb   # v6
+
+    - name: Cache Gradle packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', 
+          '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Run V2 Protocol Tests
+      run: |
+        jdk_paths="${{ steps.test-jdk.outputs.path }}"
+        for extra in "${{ steps.jdk8.outputs.path }}" "${{ steps.jdk11.outputs.path }}"; do
+          if [ -n "$extra" ]; then
+            jdk_paths="$jdk_paths,$extra"
+          fi
+        done
+        ./gradlew :btrace-core:test --tests "io.btrace.core.comm.v2.*" \
+                                     --tests "io.btrace.core.comm.Protocol*" \
+                                     --tests "io.btrace.core.comm.WireProtocol*" \
+                                     -PtestJavaVersion=${{ matrix.java }} \
+                                     "-Porg.gradle.java.installations.paths=$jdk_paths" \
+                                     --rerun-tasks
+
+    - name: Upload Test Reports
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7
+      with:
+        name: test-reports-${{ matrix.os }}-${{ matrix.arch }}-java-${{ 
+          matrix.java }}
+        retention-days: 7
+        path: |
+          btrace-core/build/reports/tests/**
+          btrace-core/build/test-results/**
+
+    timeout-minutes: 150
